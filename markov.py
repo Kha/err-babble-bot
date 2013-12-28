@@ -68,7 +68,7 @@ class MarkovChain:
 		)
 
 	def add(self, text):
-		words = text.split()
+		words = list(map(sys.intern, text.split()))
 		for ngram in ngrams(self._n, words):
 			self._data[ngram[:-1]][ngram[-1]] += 1
 
