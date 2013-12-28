@@ -1,0 +1,9 @@
+[Core]
+Name = BabbleBot
+Module = .
+
+[Documentation]
+Description = Unfug
+
+[Python]
+Version=3
