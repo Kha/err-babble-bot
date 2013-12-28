@@ -63,21 +63,19 @@ class MarkovChain:
 		assert(n >= 2)
 		self._n = n
 		# {(n-1)-gram: next-word: total-frequency}
-		self._data = collections.defaultdict(
-				lambda: collections.defaultdict(lambda: 0)
-		)
+		self._data = collections.defaultdict(lambda: 0)
 
 	def add(self, text):
 		words = list(map(sys.intern, text.split()))
 		for ngram in ngrams(self._n, words):
-			self._data[ngram[:-1]][ngram[-1]] += 1
+			self._data[ngram] += 1
 
 	def completions(self, words):
 		"""Returns a dict {word: frequency}, where 'word' is a
 		valid n-gram completion of the given word list."""
-		ret = self._data.get(ngram(self._n-1, words))
-		if ret is None:
-			return {}
+		words = ngram(self._n-1, words)
+		ret = {ngram[-1]: self._data[ngram] for ngram in self._data
+				if ngram[:-1] == words}
 		freq_sum = sum(ret.values())
 		return {word: ret[word] / freq_sum for word in ret}
 
