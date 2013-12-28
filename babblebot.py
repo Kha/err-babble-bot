@@ -36,6 +36,7 @@ class BabbleBot(BotPlugin):
 
 	@botcmd
 	def babble_reload(self, mess, args):
+		"""Reloads all babble sources."""
 		yield 'Reloading...'
 		for error in self.reload():
 			yield error
@@ -43,4 +44,25 @@ class BabbleBot(BotPlugin):
 
 	@botcmd
 	def babble(self, mess, args):
+		"""Babbles or babble-completes."""
 		return self.model.sample(start=args)
+
+	@botcmd
+	def babble_sources(self, mess, args):
+		"""Lists all babble sources."""
+		return "\n".join("{} {}".format(idx, source) for idx, source in
+				enumerate(self.config['SOURCES']))
+
+	@botcmd
+	def babble_sources_add(self, mess, args):
+		"""Adds a URL as a new babble source."""
+		self.config['SOURCES'].append(args)
+		for msg in self.babble_reload(mess, args):
+			yield msg
+
+	@botcmd
+	def babble_sources_remove(self, mess, args):
+		"""Removes the babble source with the given index."""
+		del self.config['SOURCES'][int(args)]
+		for msg in self.babble_reload(mess, args):
+			yield msg
