@@ -24,12 +24,10 @@ def weighted_random_key(dictionary):
 
 
 def suffix(n, items):
-	return items[len(items)-n:]
-
-
-def ngram(n, items):
-	items = (n-len(items)) * (None,) + items
-	return suffix(n, items)
+	if len(items) <= n:
+		return items
+	else:
+		return items[len(items)-n:]
 
 
 END = object()
@@ -38,24 +36,24 @@ END = object()
 def ngrams(n, words):
 	"""Yields all n-grams of the word list.
 
-	Starts with (None, ... ,None, words[0]) and continues until
-	(..., words[-1], None). To make the function messier,
+	Starts with (words[0],) and continues until
+	(..., words[-1], END). To make the function messier,
 	additionally yields n-grams (..., words[i], END) if
 	words[i] is deemed the end of a sentence.
 	"""
-	ngram = n * (None,)
+	ngram = ()
 	for word in words + [END]:
-		ngram = ngram[1:] + (word,)
+		ngram = suffix(n, ngram + (word,))
 		yield ngram
 		if word is not END and word[-1] in ['.', '!', '?']:
-			yield ngram[1:] + (END,)
+			yield suffix(n, ngram + (END,))
 
 
 class MarkovChain:
 	"""A frequency table of n-grams.
 
-	n-grams are represented as n-tuples, where None items may
-	occur as padding at the beginning, and the last item may
+	n-grams are represented as k-tuples, where k may be less
+	than n for the text's first grams, and the last item may
 	be END to signify a sentence end.
 	"""
 
@@ -70,23 +68,34 @@ class MarkovChain:
 		for ngram in ngrams(self._n, words):
 			self._data[ngram] += 1
 
-	def completions(self, words):
+	def completions(self, words, n=None):
 		"""Returns a dict {word: frequency}, where 'word' is a
-		valid n-gram completion of the given word list."""
-		words = ngram(self._n-1, words)
-		ret = {ngram[-1]: self._data[ngram] for ngram in self._data
-				if ngram[:-1] == words}
+		valid n-gram completion of the given word list.
+
+		n may be any integer not larger than the n passed to the
+		constructor.
+		"""
+		if n is None:
+			n = self._n
+		assert n <= self._n
+
+		words = suffix(n-1, words)
+		n = min(n, len(words)+1)
+		ret = {ngram[n-1]: self._data[ngram] for ngram in self._data
+				if len(ngram) >= n and ngram[:n-1] == words}
 		freq_sum = sum(ret.values())
 		return {word: ret[word] / freq_sum for word in ret}
 
-	def sample(self, words, try_end=False, disfavor=None):
+	def sample(self, words, try_end=False, disfavor=None, n=None):
 		"""Returns a random word that is a valid n-gram completion
 		of the given word list.
 
 		If 'try_end', prefer sentence ends.
 		Weigh words in freq dict 'disfavor' negatively.
+		n may be any integer not larger than the n passed to the
+		constructor.
 		"""
-		completions = self.completions(words)
+		completions = self.completions(words, n)
 		if try_end and END in completions:
 			return END
 
@@ -102,12 +111,11 @@ class MarkovChains:
 	"""
 
 	def __init__(self, n):
-		self._chains = {i: MarkovChain(i) for i in range(2,n+1 + 1)}
+		self._chain = MarkovChain(n+1)
 		self._n = n
 
 	def add(self, text):
-		for chain in self._chains.values():
-			chain.add(text)
+		self._chain.add(text)
 
 	def sample(self, start="", max_len=20):
 		"""Completes the given text with random words from the Markov chains.
@@ -127,9 +135,9 @@ class MarkovChains:
 		chain_sum = 0
 		for i in range(5*max_len):
 			text = start + completions
-			disfavor = self._chains[n+1].completions(text) if len(text) >= n else {}
+			disfavor = self._chain.completions(text, n+1) if len(text) >= n else {}
 			for k in range(n,1,-1):
-				next_word = self._chains[k].sample(text, try_end=(i>=max_len), disfavor=disfavor)
+				next_word = self._chain.sample(text, try_end=(i>=max_len), disfavor=disfavor, n=k)
 				if next_word is not None:
 					chain_sum += k
 					break
