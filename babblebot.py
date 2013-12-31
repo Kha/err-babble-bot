@@ -1,9 +1,10 @@
 # encoding=utf-8
 # vim:noet:sw=4:ts=4
 
+import logging
 import urllib.request
 
-from markov import MarkovChains
+from markov import MarkovSampler
 
 from errbot import BotPlugin, botcmd
 
@@ -23,7 +24,7 @@ class BabbleBot(BotPlugin):
 		super().check_configuration(configuration)
 
 	def reload(self):
-		self.model = MarkovChains(self.config['NGRAM_N'])
+		lines = []
 		for source in self.config['SOURCES']:
 			try:
 				f = urllib.request.urlopen(source)
@@ -31,8 +32,8 @@ class BabbleBot(BotPlugin):
 				yield "Couldn't retrieve babble source: " + source
 				continue
 			with f:
-				for line in f.readlines():
-					self.model.add(line.decode())
+				lines += [line.decode() for line in f.readlines()]
+		self.model = MarkovSampler(self.config['NGRAM_N'], lines)
 
 	@botcmd
 	def babble_reload(self, mess, args):
@@ -45,7 +46,7 @@ class BabbleBot(BotPlugin):
 	@botcmd
 	def babble(self, mess, args):
 		"""Babbles or babble-completes."""
-		return self.model.sample(start=args)
+		return self.model.sample_many(start=args)
 
 	@botcmd
 	def babble_sources(self, mess, args):
