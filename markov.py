@@ -72,10 +72,12 @@ class NGramTable:
 		# Change dict into sorted list for binary search.
 		# First group n-grams by length, which is < n
 		# for the first (n-1) grams in a line.
-		self._data = {length: sorted(freqs)
-				for (length, freqs) in group_by(data.items(),
-					lambda freq: len(freq[0])
-				).items()}
+		self._data = (max_n+1) * [[]]
+		for (length, freqs) in group_by(
+				data.items(),
+				lambda ngram: len(ngram[0])
+		).items():
+			self._data[length] = sorted(freqs)
 
 	def completions(self, n, start):
 		"""Gets all n-gram completions of the given words.
