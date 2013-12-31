@@ -166,4 +166,10 @@ class MarkovSampler:
 			completions += (next_word,)
 
 		logging.info("max_len {}, length {}, average ngram {:.2}".format(max_len, len(completions), chain_sum/(len(completions)+1)))
-		return " ".join(start + completions)
+		return start + completions
+
+	def sample_best(self, start="", max_len=20, times=5):
+		"""Invokes sample_many 'times' times and returns the output with the smallest difference to max_len."""
+		best_text = min((self.sample_many(start, max_len) for i in range(times)),
+			key=lambda text: abs(len(text) - max_len))
+		return " ".join(best_text)

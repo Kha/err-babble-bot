@@ -2,6 +2,7 @@
 # vim:noet:sw=4:ts=4
 
 import logging
+import random
 import urllib.request
 
 from markov import MarkovSampler
@@ -46,7 +47,7 @@ class BabbleBot(BotPlugin):
 	@botcmd
 	def babble(self, mess, args):
 		"""Babbles or babble-completes."""
-		return self.model.sample_many(start=args)
+		return self.model.sample_best(start=args, max_len=random.randint(1, 30), times=5)
 
 	@botcmd
 	def babble_sources(self, mess, args):
