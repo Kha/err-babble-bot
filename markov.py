@@ -1,4 +1,4 @@
-# encoding=utf-8
+"""Markov chain fun for the whole family."""
 # vim:noet:sw=4:ts=4
 
 import bisect
@@ -9,11 +9,13 @@ import sys
 
 
 def weighted_random_key(dictionary):
+	"""Returns a random key with keys weighted by their respective value.
+	Returns None for empty dicts non-positive weight sums."""
 	if not dictionary:
 		return None
 
 	weight_sum = sum(dictionary.values())
-	if not weight_sum:
+	if weight_sum <= 0:
 		return None
 
 	choice = random.random() * weight_sum
@@ -21,7 +23,11 @@ def weighted_random_key(dictionary):
 		choice -= weight
 		if choice < 0:
 			return item
-	return item[-1]  # floating-point rounding error
+	return dictionary.keys()[-1]  # floating-point rounding error
+
+
+def init(items):
+	return items[:len(items)-1]
 
 
 def suffix(n, items):
@@ -31,77 +37,65 @@ def suffix(n, items):
 		return items[len(items)-n:]
 
 
-END = "$$$"
+START = "" # For sorting. I'm so sorry.
+END = object()
 
 
 def ngrams(n, words):
 	"""Yields all n-grams of the word list.
 
-	Starts with (words[0],) and continues until
+	Starts with (START, ..., START, words[0],) and continues until
 	(words[-n+1], ..., words[-1], END). To make the function messier,
 	additionally yields n-grams (..., words[i], END) if
 	words[i] is deemed the end of a sentence.
 	"""
-	ngram = ()
+	ngram = n * (START,)
 	for word in words + [END]:
-		ngram = suffix(n, ngram + (word,))
+		ngram = ngram[1:] + (word,)
 		yield ngram
 		if word is not END and word[-1] in ['.', '!', '?']:
-			yield suffix(n, ngram + (END,))
+			yield ngram[1:] + (END,)
 
 
-def group_by(a, f):
-	ret = collections.defaultdict(list)
-	for x in a:
-		ret[f(x)].append(x)
-	return ret
+def pad_left(tup, width, pad_item):
+	return (width-len(tup)) * (pad_item,) + tup
 
 
 class NGramTable:
 	"""A table for completing n-grams (where n <= max_n)."""
 	def __init__(self, max_n, lines):
 		assert max_n >= 2
-		self._max_n = max_n
+		self.max_n = max_n
 
 		# compute frequencies
 		data = collections.Counter(ngram
 				for line in lines
-				for ngram in ngrams(max_n, list(map(sys.intern, line.split())))
+				for ngram in ngrams(max_n, [sys.intern(word) for word in line.split()])
 		)
 
-		# Change dict into sorted list for binary search.
-		# First group n-grams by length, which is < n
-		# for the first (n-1) grams in a line.
-		self._data = (max_n+1) * [[]]
-		for (length, freqs) in group_by(
-				data.items(),
-				lambda ngram: len(ngram[0])
-		).items():
-			self._data[length] = sorted(freqs)
+		# change dict into sorted list for binary search
+		self._data = sorted(data.items(), key=lambda item: init(item[0]))
 
 	def completions(self, n, start):
 		"""Gets all n-gram completions of the given words.
 		n may not be greater than max_n.
 		Returns {word: total_frequency}.
 		"""
+		assert n <= self.max_n
 		start = suffix(n-1, start)
+
 		if len(start) < n-1:
-			# Completing an n-gram at a line start,
-			# get all n-grams with exactly that length.
-			lengths = (len(start)+1,)
-		else:
-			# else get all grams with length >= n, which
-			# together contain all n-grams
-			lengths = range(n,self._max_n+1)
+			# pad from left, then do a max_n completion
+			start = pad_left(start, self.max_n-1, START)
+			n = self.max_n-1
 
 		ret = collections.defaultdict(lambda: 0)
-		for length in lengths:
-			data = self._data[length]
-			# get all grams with start as prefix
-			i = bisect.bisect_left(data, (start, 0))
-			while i < len(data) and data[i][0][:len(start)] == start:
-				ret[data[i][0][len(start)]] += data[i][1]
-				i += 1
+		data = self._data
+		# lookup all n-grams with start as prefix
+		i = bisect.bisect_left(data, (start,))
+		while i < len(data) and data[i][0][:len(start)] == start:
+			ret[data[i][0][len(start)]] += data[i][1]
+			i += 1
 		return ret
 
 	def normalized_completions(self, n, start):
@@ -157,7 +151,7 @@ class MarkovSampler:
 		for i in range(5*max_len):
 			text = start + completions
 			disfavor = self._table.normalized_completions(n+1, text) if len(text) >= n else {}
-			for k in range(n,1,-1):
+			for k in range(n, 1, -1):
 				next_word = self.sample(k, text, try_end=(i>=max_len), disfavor=disfavor)
 				if next_word is not None:
 					chain_sum += k
@@ -173,5 +167,5 @@ class MarkovSampler:
 	def sample_best(self, start="", max_len=20, times=5):
 		"""Invokes sample_many 'times' times and returns the output with the smallest difference to max_len."""
 		best_text = min((self.sample_many(start, max_len) for i in range(times)),
-			key=lambda text: abs(len(text) - max_len))
+			key=lambda text: abs(len(text) - len(start.split()) - max_len))
 		return " ".join(best_text)
