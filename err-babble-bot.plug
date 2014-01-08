@@ -3,7 +3,7 @@ Name = BabbleBot
 Module = .
 
 [Documentation]
-Description = Unfug
+Description = Markov chain-based Err plugin for nonsense generation
 
 [Python]
 Version=3
