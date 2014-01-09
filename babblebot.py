@@ -52,7 +52,7 @@ class BabbleBot(BotPlugin):
 	@botcmd
 	def babble(self, mess, args):
 		"""Babbles or babble-completes."""
-		return self.model.sample_best(start=args, max_len=random.randint(1, 30), times=5)
+		return self.model.sample_best(start=args, max_len=random.randint(1, 20), times=5)
 
 	@botcmd
 	def babble_sources(self, mess, args):
