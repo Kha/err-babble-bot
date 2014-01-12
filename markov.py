@@ -36,29 +36,25 @@ def suffix(n, items):
 	else:
 		return items[len(items)-n:]
 
-
-START = "" # For sorting. I'm so sorry.
-END = object()
+# Magic strings for sorting. I'm so sorry.
+START = ""
+END = "$$$"
 
 
 def ngrams(n, words):
 	"""Yields all n-grams of the word list.
 
-	Starts with (START, ..., START, words[0],) and continues until
-	(words[-n+1], ..., words[-1], END). To make the function messier,
-	additionally yields n-grams (..., words[i], END) if
-	words[i] is deemed the end of a sentence.
+	Starts with (START, words[0], ..., words[n-2]), and continues until
+	(words[-(n-1)], words[-1], END), ..., (words[-1, END).
 	"""
-	ngram = n * (START,)
+	ngram = (START,)
 	for word in words + [END]:
-		ngram = ngram[1:] + (word,)
+		ngram = suffix(n, ngram + (word,))
+		if len(ngram) == n or word is END:
+			yield ngram
+	while len(ngram) > 2:
+		ngram = ngram[1:]
 		yield ngram
-		if word is not END and word[-1] in ['.', '!', '?']:
-			yield ngram[1:] + (END,)
-
-
-def pad_left(tup, width, pad_item):
-	return (width-len(tup)) * (pad_item,) + tup
 
 
 class NGramTable:
@@ -83,19 +79,20 @@ class NGramTable:
 		"""
 		assert n <= self.max_n
 		start = suffix(n-1, start)
-
 		if len(start) < n-1:
-			# pad from left, then do a max_n completion
-			start = pad_left(start, self.max_n-1, START)
-			n = self.max_n-1
+			start = (START,) + start
 
 		ret = collections.defaultdict(lambda: 0)
 		data = self._data
-		# lookup all n-grams with start as prefix
+		# lookup all grams with start as prefix
 		i = bisect.bisect_left(data, (start,))
-		while i < len(data) and data[i][0][:len(start)] == start:
-			ret[data[i][0][len(start)]] += data[i][1]
-			i += 1
+		while i < len(data):
+			(ngram, count) = data[i]
+			if ngram[:len(start)] > start:
+				break
+			if len(ngram) > len(start):
+				ret[ngram[len(start)]] += count
+				i += 1
 		return ret
 
 	def normalized_completions(self, n, start):
