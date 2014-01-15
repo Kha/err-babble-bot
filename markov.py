@@ -26,8 +26,11 @@ def weighted_random_key(dictionary):
 	return dictionary.keys()[-1]  # floating-point rounding error
 
 
-def init(items):
-	return items[:len(items)-1]
+def group_by(items, f):
+	ret = collections.defaultdict(list)
+	for item in items:
+		ret[f(item)].append(item)
+	return ret
 
 
 def suffix(n, items):
@@ -36,68 +39,41 @@ def suffix(n, items):
 	else:
 		return items[len(items)-n:]
 
-# Magic strings for sorting. I'm so sorry.
-START = ""
-END = "$$$"
 
-
-def ngrams(n, words):
-	"""Yields all n-grams of the word list.
-
-	Starts with (START, words[0], ..., words[n-2]), and continues until
-	(words[-(n-1)], words[-1], END), ..., (words[-1, END).
-	"""
-	ngram = (START,)
-	for word in words + [END]:
-		ngram = suffix(n, ngram + (word,))
-		if len(ngram) == n or word is END:
-			yield ngram
-	while len(ngram) > 2:
-		ngram = ngram[1:]
-		yield ngram
+END = object()
 
 
 class NGramTable:
-	"""A table for completing n-grams (where n <= max_n)."""
-	def __init__(self, max_n, lines):
-		assert max_n >= 2
-		self.max_n = max_n
+	"""A table for completing n-grams."""
 
-		# compute frequencies
-		data = collections.Counter(ngram
-				for line in lines
-				for ngram in ngrams(max_n, [sys.intern(word) for word in line.split()])
-		)
+	class Loc(collections.namedtuple('Loc', ['line', 'idx'])):
+		@property
+		def word(self):
+			return self.line[self.idx]
 
-		# change dict into sorted list for binary search
-		self._data = sorted(data.items(), key=lambda item: init(item[0]))
+		def next_word(self, start):
+			end_idx = self.idx + len(start)
+			if start == self.line[self.idx:end_idx]:
+				return self.line[end_idx] if end_idx < len(self.line) else END
 
-	def completions(self, n, start):
+	def __init__(self, lines):
+		self._lines = [tuple(sys.intern(word) for word in line.split()) for line in lines]
+		self._locs = group_by((NGramTable.Loc(line, idx) for line in self._lines for idx, word in enumerate(line)),
+		                      lambda loc: loc.word)
+
+	def get_start_gram(self, n):
+		return random.choice(self._lines)[:n]
+
+	def completions(self, start):
 		"""Gets all n-gram completions of the given words.
-		n may not be greater than max_n.
 		Returns {word: total_frequency}.
 		"""
-		assert n <= self.max_n
-		start = suffix(n-1, start)
-		if len(start) < n-1:
-			start = (START,) + start
+		next_words = (loc.next_word(start) for loc in self._locs[start[0]])
+		return collections.Counter(filter(None, next_words))
 
-		ret = collections.defaultdict(lambda: 0)
-		data = self._data
-		# lookup all grams with start as prefix
-		i = bisect.bisect_left(data, (start,))
-		while i < len(data):
-			(ngram, count) = data[i]
-			if ngram[:len(start)] > start:
-				break
-			if len(ngram) > len(start):
-				ret[ngram[len(start)]] += count
-				i += 1
-		return ret
-
-	def normalized_completions(self, n, start):
+	def normalized_completions(self, start):
 		"""Gets completions with relative frequencies (accumulating to 1)."""
-		completions = self.completions(n, start)
+		completions = self.completions(start)
 		freq_sum = sum(completions.values())
 		if not freq_sum:
 			return {}
@@ -109,9 +85,9 @@ class MarkovSampler:
 	"""A very customized markov chain sampler."""
 	def __init__(self, n, lines):
 		self.n = n
-		self._table = NGramTable(n+1, lines)
+		self._table = NGramTable(lines)
 
-	def sample(self, n, start, try_end=False, disfavor=None):
+	def sample(self, start, try_end=False, disfavor=None):
 		"""Returns a random word that is a valid n-gram completion
 		of the given word list.
 
@@ -119,7 +95,7 @@ class MarkovSampler:
 		Weigh words in freq dict 'disfavor' negatively.
 		n may not be larger than self.n+1.
 		"""
-		completions = self._table.completions(n, start)
+		completions = self._table.completions(start)
 		if try_end and END in completions:
 			return END
 
@@ -127,7 +103,6 @@ class MarkovSampler:
 			if word in completions:
 				completions[word] *= 1.0 - disfavor[word]
 		return weighted_random_key(completions)
-
 
 	def sample_many(self, start="", max_len=20):
 		"""Completes the given text with random words from multiple n-gram sources.
@@ -143,13 +118,18 @@ class MarkovSampler:
 		n = max(min(self.n, max_len-1), 2)
 
 		start = tuple(start.split())
-		completions = ()
-		chain_sum = 0
+		if start:
+			completions = ()
+			chain_sum = 0
+		else:
+			completions = self._table.get_start_gram(n)
+			chain_sum = len(completions) + 1
+
 		for i in range(5*max_len):
 			text = start + completions
-			disfavor = self._table.normalized_completions(n+1, text) if len(text) >= n else {}
+			disfavor = self._table.normalized_completions(suffix(n+1, text)) if len(text) >= n else {}
 			for k in range(n, 1, -1):
-				next_word = self.sample(k, text, try_end=(i>=max_len), disfavor=disfavor)
+				next_word = self.sample(suffix(k, text), try_end=(i>=max_len), disfavor=disfavor)
 				if next_word is not None:
 					chain_sum += k
 					break
