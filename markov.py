@@ -109,7 +109,7 @@ class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
 		for ngram, next_ngram in zip(ngrams, ngrams[1:] + [None]):
 			p *= ngram.count
 			# if next_ngram is None or ngram.loc != next_ngram.loc:
-			output += "{}\tp={:.3}<br/>\n".format(ngram._print_context(), ngram.count)
+			output += "{}\tp={:.3}<br/>\n".format(ngram._print_context(), float(ngram.count))
 		output += "p={:.3}, average n={:.2}".format(
 				p,
 				sum(len(ngram.words) for ngram in ngrams)/len(ngrams) if ngrams else 0.
