@@ -8,22 +8,23 @@ import random
 import sys
 
 
-def weighted_random_key(dictionary):
-	"""Returns a random key with keys weighted by their respective value.
-	Returns None for empty dicts non-positive weight sums."""
-	if not dictionary:
+def weighted_random_item(items, weight):
+	"""Returns a random item with items weighted by a weight function.
+	Returns None for empty lists or non-positive weight sums.
+	Don't you dare to use a non-deterministic weight function."""
+	if not items:
 		return None
 
-	weight_sum = sum(dictionary.values())
+	weight_sum = sum(weight(item) for item in items)
 	if weight_sum <= 0:
 		return None
 
 	choice = random.random() * weight_sum
-	for item, weight in dictionary.items():
-		choice -= weight
+	for item in items:
+		choice -= weight(item)
 		if choice < 0:
 			return item
-	return dictionary.keys()[-1]  # floating-point rounding error
+	return items[-1]  # floating-point rounding error
 
 
 def group_by(items, f):
@@ -43,42 +44,103 @@ def suffix(n, items):
 END = object()
 
 
+class Loc(collections.namedtuple('Loc', ['line', 'idx'])):
+	"""A word in the text identified by its line and an index therein."""
+
+	@property
+	def word(self):
+		return self.line[self.idx]
+
+	@property
+	def next_loc(self):
+		if self.idx+1 < len(self.line):
+			return Loc(self.line, self.idx+1)
+
+	def next_word(self, start):
+		end_idx = self.idx + len(start)
+		if start == self.line[self.idx:end_idx]:
+			return self.line[end_idx] if end_idx < len(self.line) else END
+
+
+class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
+	"""A happy ngram and its metadata."""
+
+	@staticmethod
+	def from_loc(n, loc):
+		return NGram((loc.line + (END,))[loc.idx:loc.idx+n], 1, loc)
+
+	# it's a monoid!! Well, almost.
+	def merge(self, other):
+		# assert self.words == other.words
+		if self.count > other.count:
+			return NGram(self.words, self.count + other.count, self.loc)
+		else:
+			return NGram(other.words, self.count + other.count, other.loc)
+
+	@staticmethod
+	def empty():
+		return NGram(None, 0, None)
+
+	def _print_context(self):
+		CONTEXT_SIZE = 5
+
+		start_idx = self.loc.idx
+		end_idx = self.loc.idx + len(self.words)
+		output = self.loc.line[max(0,start_idx-CONTEXT_SIZE):start_idx] +\
+				("<b>{}</b>".format(" ".join(self.loc.line[start_idx:end_idx])),) +\
+				self.loc.line[end_idx:end_idx+CONTEXT_SIZE]
+		output = " ".join(output)
+
+		if start_idx > CONTEXT_SIZE:
+			output = "…" + output
+		if end_idx+CONTEXT_SIZE < len(self.loc.line):
+			output += "…"
+
+		return output
+
+	@staticmethod
+	def print_context(ngrams):
+		output = []
+		for ngram, next_ngram in zip(ngrams, ngrams[1:] + [None]):
+			if next_ngram is None or ngram.loc != next_ngram.loc:
+				output.append(ngram._print_context())
+		return "<div>" + "<br/>\n".join(output) + "</div>"
+
+	@property
+	def compl(self):
+		return self.words[-1]
+
+
 class NGramTable:
 	"""A table for completing n-grams."""
 
-	class Loc(collections.namedtuple('Loc', ['line', 'idx'])):
-		@property
-		def word(self):
-			return self.line[self.idx]
-
-		def next_word(self, start):
-			end_idx = self.idx + len(start)
-			if start == self.line[self.idx:end_idx]:
-				return self.line[end_idx] if end_idx < len(self.line) else END
-
 	def __init__(self, lines):
 		self._lines = [tuple(sys.intern(word) for word in line.split()) for line in lines]
-		self._locs = group_by((NGramTable.Loc(line, idx) for line in self._lines for idx, word in enumerate(line)),
+		self._locs = group_by((Loc(line, idx) for line in self._lines for idx, word in enumerate(line)),
 		                      lambda loc: loc.word)
 
 	def get_start_gram(self, n):
-		return random.choice(self._lines)[:n]
+		return NGram.from_loc(n, Loc(random.choice(self._lines), 0))
 
 	def completions(self, start):
 		"""Gets all n-gram completions of the given words.
-		Returns {word: total_frequency}.
+		Returns {compl: ngram}.
 		"""
-		next_words = (loc.next_word(start) for loc in self._locs[start[0]])
-		return collections.Counter(filter(None, next_words))
+		ret = collections.defaultdict(NGram.empty)
+		for loc in self._locs[start[0]]:
+			compl = loc.next_word(start)
+			if compl:
+				ret[compl] = ret[compl].merge(NGram.from_loc(len(start) + 1, loc))
+		return ret
 
 	def normalized_completions(self, start):
 		"""Gets completions with relative frequencies (accumulating to 1)."""
 		completions = self.completions(start)
-		freq_sum = sum(completions.values())
+		freq_sum = sum(ngram.count for ngram in completions.values())
 		if not freq_sum:
 			return {}
 		else:
-			return {compl: freq / freq_sum for (compl, freq) in completions.items()}
+			return {compl: ngram.count / freq_sum for (compl, ngram) in completions.items()}
 
 
 class MarkovSampler:
@@ -97,15 +159,15 @@ class MarkovSampler:
 		"""
 		completions = self._table.completions(start)
 		if try_end and END in completions:
-			return END
+			return completions[END]
 
-		for word in disfavor:
-			if word in completions:
-				completions[word] *= 1.0 - disfavor[word]
-		return weighted_random_key(completions)
+		word = weighted_random_item(list(completions),
+				weight = lambda word: completions[word].count * (1.0 - disfavor.get(word, 0))
+		)
+		return None if word is None else completions[word]
 
 	def sample_many(self, start="", max_len=20):
-		"""Completes the given text with random words from multiple n-gram sources.
+		"""Completes the given text with random max_n-grams from multiple gram sources.
 
 		Incrementally samples the next word from an n-gram, avoiding
 		(n+1)-gram completions and falling back to smaller n if no
@@ -119,36 +181,41 @@ class MarkovSampler:
 
 		start = tuple(start.split())
 		if start:
-			completions = ()
+			ngrams = []
+			text = ()
 			chain_sum = 0
 		else:
-			completions = self._table.get_start_gram(n)
-			chain_sum = len(completions) + 1
+			ngrams = [self._table.get_start_gram(n)]
+			text = ngrams[0].words
 
 		for i in range(5*max_len):
-			text = start + completions
-			disfavor = self._table.normalized_completions(suffix(n+1, text)) if len(text) >= n else {}
-			for k in range(n, 1, -1):
-				next_word = self.sample(suffix(k, text), try_end=(i>=max_len), disfavor=disfavor)
-				if next_word is not None:
-					chain_sum += k
+			disfavor = self._table.normalized_completions(suffix(n, text)) if len(text) >= n else {}
+			for k in range(n-1, 0, -1):
+				ngram = self.sample(suffix(k, text), try_end=(i>=max_len), disfavor=disfavor)
+				if ngram is not None:
 					break
 
-			if next_word in [None, END]:
+			if ngram is None or ngram.compl is END:
 				break
-			completions += (next_word,)
+			ngrams.append(ngram)
+			text += (ngram.compl,)
 
-		logging.info("max_len {}, length {}, average ngram {:.2}".format(max_len, len(completions), chain_sum/(len(completions)+1)))
-		return completions
+		logging.info("max_len {}, length {}, average ngram {:.2}".format(
+			max_len, len(ngrams),
+			sum(len(ngram.words) for ngram in ngrams)/len(ngrams) if len(ngrams) else 0
+		))
+		return text, ngrams
 
 	def sample_best(self, start="", max_len=20, times=5):
 		"""Invokes sample_many 'times' times and returns the output with the smallest difference to max_len."""
 		samples = [self.sample_many(start, max_len) for i in range(times)]
-		samples = [sample for sample in samples if sample]
+		# filter out empty completions
+		samples = [sample for sample in samples if sample[0]]
 		if not samples:
-			text = ("LOOK BEHIND YOU A THREE-HEADED MONKEY",)
+			text = ["LOOK BEHIND YOU A THREE-HEADED MONKEY"]
+			ngrams = []
 		else:
-			text = min(samples, key=lambda text: abs(len(text) - max_len))
+			text, ngrams = min(samples, key=lambda sample: abs(len(sample[0]) - max_len))
 		if start:
 			text = (start,) + text
-		return " ".join(text)
+		return " ".join(text), ngrams

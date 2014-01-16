@@ -5,12 +5,16 @@ import logging
 import random
 import urllib.request
 
-from markov import MarkovSampler
+import markov
 
 from errbot import BotPlugin, botcmd
 
 
 class BabbleBot(BotPlugin):
+	def __init__(self):
+		super().__init__()
+		self.ngrams = []
+
 	def activate(self):
 		super().activate()
 		if 'sources' not in self:
@@ -39,7 +43,7 @@ class BabbleBot(BotPlugin):
 				continue
 			with f:
 				lines += [line.decode() for line in f.readlines()]
-		self.model = MarkovSampler(self.config['NGRAM_N'], lines)
+		self.model = markov.MarkovSampler(self.config['NGRAM_N'], lines)
 
 	@botcmd
 	def babble_reload(self, mess, args):
@@ -52,7 +56,13 @@ class BabbleBot(BotPlugin):
 	@botcmd
 	def babble(self, mess, args):
 		"""Babbles or babble-completes."""
-		return self.model.sample_best(start=args, max_len=random.randint(1, 20), times=5)
+		text, ngrams = self.model.sample_best(start=args, max_len=random.randint(1, 20), times=5)
+		self.ngrams = ngrams
+		return text
+
+	@botcmd
+	def wtfwheredidthatcomefrom(self, mess, args):
+		return markov.NGram.print_context(self.ngrams)
 
 	@botcmd
 	def babble_sources(self, mess, args):
