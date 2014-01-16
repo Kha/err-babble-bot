@@ -3,6 +3,7 @@
 
 import bisect
 import collections
+import html
 import logging
 import random
 import sys
@@ -90,10 +91,9 @@ class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
 
 		start_idx = self.loc.idx
 		end_idx = self.loc.idx + len(self.words)
-		output = self.loc.line[max(0,start_idx-CONTEXT_SIZE):start_idx] +\
-				("<b>{}</b>".format(" ".join(self.loc.line[start_idx:end_idx])),) +\
-				self.loc.line[end_idx:end_idx+CONTEXT_SIZE]
-		output = " ".join(output)
+		return html.escape(" ".join(self.loc.line[max(0,start_idx-CONTEXT_SIZE):start_idx])) +\
+				"<b>{}</b>".format(html.escape(" ".join(self.loc.line[start_idx:end_idx]))) +\
+				html.escape(" ".join(self.loc.line[end_idx:end_idx+CONTEXT_SIZE]))
 
 		if start_idx > CONTEXT_SIZE:
 			output = "…" + output
