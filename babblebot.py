@@ -65,6 +65,10 @@ class BabbleBot(BotPlugin):
 		return markov.NGram.print_context(self.ngrams)
 
 	@botcmd
+	def context(self, mess, args):
+		return self.wtfwheredidthatcomefrom(mess, args)
+
+	@botcmd
 	def babble_sources(self, mess, args):
 		"""Lists all babble sources."""
 		return "\n".join("{} {}".format(idx, source) for idx, source in
