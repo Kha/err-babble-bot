@@ -28,7 +28,7 @@ class BabbleBot(BotPlugin):
 			self.config = self.get_configuration_template()
 
 	def get_configuration_template(self):
-		return {'NGRAM_N': 3}
+		return {'NGRAM_N': 3, 'CONTEXT_SIZE': 5}
 
 	def check_configuration(self, configuration):
 		super().check_configuration(configuration)
@@ -62,7 +62,7 @@ class BabbleBot(BotPlugin):
 
 	@botcmd
 	def wtfwheredidthatcomefrom(self, mess, args):
-		return markov.NGram.print_context(self.ngrams)
+		return markov.NGram.print_context(self.ngrams, self.config['CONTEXT_SIZE'])
 
 	@botcmd
 	def context(self, mess, args):

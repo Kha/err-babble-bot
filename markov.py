@@ -86,33 +86,32 @@ class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
 	def empty():
 		return NGram(None, 0, None)
 
-	def _print_context(self):
-		CONTEXT_SIZE = 5
+	def _print_context(self, context_size):
 
 		start_idx = self.loc.idx
 		end_idx = self.loc.idx + len(self.words)
-		parts = [html.escape(" ".join(self.loc.line[max(0,start_idx-CONTEXT_SIZE):start_idx])),
+		parts = [html.escape(" ".join(self.loc.line[max(0,start_idx-context_size):start_idx])),
 			"<b>{}</b>".format(html.escape(" ".join(self.loc.line[start_idx:end_idx]))),
-			html.escape(" ".join(self.loc.line[end_idx:end_idx+CONTEXT_SIZE]))
+			html.escape(" ".join(self.loc.line[end_idx:end_idx+context_size]))
 		]
 
 		output = " ".join(filter(None, parts))
 
-		if start_idx > CONTEXT_SIZE:
+		if start_idx > context_size:
 			output = "…" + output
-		if end_idx+CONTEXT_SIZE < len(self.loc.line):
+		if end_idx+context_size < len(self.loc.line):
 			output += "…"
 
 		return output
 
 	@staticmethod
-	def print_context(ngrams):
+	def print_context(ngrams, context_size=5):
 		output = "<div>"
 		p = 1.
 		for ngram, next_ngram in zip(ngrams, ngrams[1:] + [None]):
 			p *= ngram.count
 			# if next_ngram is None or ngram.loc != next_ngram.loc:
-			output += "{}\tp={:.3}<br/>\n".format(ngram._print_context(), float(ngram.count))
+			output += "{}\tp={:.3}<br/>\n".format(ngram._print_context(context_size), float(ngram.count))
 		output += "p={:.3}, average n={:.2}".format(
 				p,
 				sum(len(ngram.words) for ngram in ngrams)/len(ngrams) if ngrams else 0.
