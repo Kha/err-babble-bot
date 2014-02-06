@@ -1,6 +1,5 @@
 """Markov chain fun for the whole family."""
 
-import bisect
 import collections
 import html
 import logging
@@ -44,17 +43,23 @@ def suffix(n, items):
 END = object()
 
 
-class Loc(collections.namedtuple('Loc', ['line', 'idx'])):
+class Loc(collections.namedtuple('Loc', ['source', 'line_idx', 'idx'])):
     """A word in the text identified by its line and an index therein."""
+
+    @property
+    def line(self):
+        return self.source[self.line_idx]
 
     @property
     def word(self):
         return self.line[self.idx]
 
-    @property
-    def next_loc(self):
-        if self.idx+1 < len(self.line):
-            return Loc(self.line, self.idx+1)
+    def words(self, n):
+        return self.line[self.idx:self.idx+n]
+
+    def match(self, words):
+        """Returns True iff 'words' start at this loc."""
+        return words == self.words(len(words))
 
     def next_word(self, start):
         """The word after 'start', assuming 'start' begins at this loc.
@@ -62,9 +67,12 @@ class Loc(collections.namedtuple('Loc', ['line', 'idx'])):
         None if 'start' doesn't begin at this loc.
         """
         end_idx = self.idx + len(start)
-        if start == self.line[self.idx:end_idx]:
+        if self.match(start):
             return self.line[end_idx] if end_idx < len(self.line) else END
 
+    def start_of_next_line(self):
+        if self.line_idx+1 < len(self.source):
+            return Loc(self.source, self.line_idx+1, 0)
 
 class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
     """A happy ngram and its metadata."""
@@ -86,10 +94,9 @@ class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
         return NGram(None, 0, None)
 
     def _print_context(self, context_size):
-
         start_idx = self.loc.idx
         end_idx = self.loc.idx + len(self.words)
-        parts = [html.escape(" ".join(self.loc.line[max(0,start_idx-context_size):start_idx])),
+        parts = [html.escape(" ".join(self.loc.line[max(0, start_idx-context_size):start_idx])),
             "<b>{}</b>".format(html.escape(" ".join(self.loc.line[start_idx:end_idx]))),
             html.escape(" ".join(self.loc.line[end_idx:end_idx+context_size]))
         ]
@@ -121,20 +128,53 @@ class NGram(collections.namedtuple('NGram', ['words', 'count', 'loc'])):
     def compl(self):
         return self.words[-1]
 
+    @property
+    def text(self):
+        words = self.words
+        if words[-1] is END:
+            words = words[:-1]
+        return " ".join(words)
+
 
 class NGramTable:
     """A table for completing n-grams."""
 
-    def __init__(self, lines):
-        self._lines = [tuple(sys.intern(word) for word in line.split()) for line in lines]
+    def __init__(self):
+        self._sources = []
+        self._locs = {}
+
+    def add_source(self, lines):
+        lines = [tuple(sys.intern(word) for word in line.split()) for line in lines]
+        self._sources.append(lines)
+        self._refresh_locs()
+
+    def _refresh_locs(self):
         # to at least speed up the search for the first word of an n-gram,
         # save a mapping from a word to all its locs
-        self._locs = group_by((Loc(line, idx) for line in self._lines for idx, word in enumerate(line)),
+        self._locs = group_by((Loc(source, line_idx, idx)
+                               for source in self._sources
+                               for line_idx, line in enumerate(source)
+                               for idx, word in enumerate(line)),
                               lambda loc: loc.word)
+
+    @property
+    def num_lines(self):
+        return sum(map(len, self._sources))
 
     def get_start_gram(self, n):
         """Returns a random n-gram starting a line."""
-        return NGram.from_loc(n, Loc(random.choice(self._lines), 0))._replace(count=1/len(self._lines))
+        loc = random.choice([Loc(source, line, 0)
+                             for source in self._sources
+                             for line in range(len(source))])
+        return NGram.from_loc(n, loc)._replace(count=1/self.num_lines)
+
+    def ngrams(self, words):
+        """Returns all NGram objects with the specified words."""
+        if words[0] in self._locs:
+            for loc in self._locs[words[0]]:
+                ngram = NGram.from_loc(len(words), loc)
+                if ngram.words == words:
+                    yield ngram
 
     def completions(self, start):
         """Gets all n-gram completions of the given words.
@@ -161,9 +201,9 @@ class NGramTable:
 
 class MarkovSampler:
     """A very customized markov chain sampler."""
-    def __init__(self, n, lines):
+    def __init__(self, n, table):
         self.n = n
-        self._table = NGramTable(lines)
+        self._table = table
 
     def sample(self, start, try_end=False, disfavor=None):
         """Returns a random word that is a valid n-gram completion
@@ -178,7 +218,7 @@ class MarkovSampler:
             return completions[END]._replace(count=1)
 
         res = weighted_random_item(list(completions),
-                weight = lambda word: completions[word].count * (1.0 - disfavor.get(word, 0))
+                weight=lambda word: completions[word].count * (1.0 - disfavor.get(word, 0))
         )
         if not res:
             return None
@@ -202,7 +242,6 @@ class MarkovSampler:
         if start:
             ngrams = []
             compls = ()
-            chain_sum = 0
         else:
             ngrams = [self._table.get_start_gram(n)]
             compls = ngrams[0].words
@@ -211,7 +250,7 @@ class MarkovSampler:
             text = start + compls
             disfavor = self._table.normalized_completions(suffix(n, text)) if len(text) >= n else {}
             for k in range(n-1, 0, -1):
-                ngram = self.sample(suffix(k, text), try_end=(i>=max_len), disfavor=disfavor)
+                ngram = self.sample(suffix(k, text), try_end=(i >= max_len), disfavor=disfavor)
                 if ngram is not None:
                     break
 
@@ -241,3 +280,15 @@ class MarkovSampler:
         if start:
             text = (start,) + text
         return " ".join(text), ngrams
+
+    def sample_answer(self, question, max_len=20, times=5, min_prefix=2):
+        question = tuple(question.split() + [END])
+        for n in range(self.n+1, min_prefix-1, -1):
+            ngrams = list(self._table.ngrams(question[-n:]))
+            if ngrams:
+                ngram = random.choice(ngrams)
+                next_loc = ngram.loc.start_of_next_line()
+                if next_loc:
+                    next_ngram = NGram.from_loc(self.n, next_loc)
+                    text, ngrams = self.sample_best(next_ngram.text, max_len, times)
+                    return text, [ngram, next_ngram] + ngrams
