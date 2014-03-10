@@ -165,7 +165,8 @@ class NGramTable:
         """Returns a random n-gram starting a line."""
         loc = random.choice([Loc(source, line, 0)
                              for source in self._sources
-                             for line in range(len(source))])
+                             for line in range(len(source))
+                             if len(source[line])])
         return NGram.from_loc(n, loc)._replace(count=1/self.num_lines)
 
     def ngrams(self, words):
